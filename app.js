@@ -2,137 +2,151 @@ import express from 'express'
 import session from 'express-session'
 import bodyParser from 'body-parser'
 import moment from 'moment-timezone'
-import {v4 as uuidv4} from 'uuid'
+import { v4 as uuidv4 } from 'uuid'
 import cors from 'cors'
+import os from 'os'
 
-
-
-// Sesiones almacenadas en Memoria (RAM)
-const sessions = {}
 const app = express()
 app.use(express.json())
-app.use(express.urlencoded({extended:true}))
 app.use(cors())
+app.use(bodyParser.urlencoded({ extended: true }))
 
-app.use(cors({
-  origin: 'http://frontend.com',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}))
+const sessions = {}
 
 app.use(
     session({
         secret: "P4-DMRCH#u09Hjk01-SesionesHTTP",
         resave: false,
         saveUninitialized: false,
-        cookie: {maxAge: 5*60*1000}
+        cookie: { maxAge: 2*60*1000 }
     })
 )
 
-//? Obtener la IP del cliente
-const getClientIP = (req) => {
-    return (
-        req.headers["x-forwarded-for"] ||
-        req.connection.remoteAddress ||
-        req.socket.remoteAddress ||
-        req.connecction.socket?.remoteAddress
-    )
+//? Función para obtener la IP
+const getLocalIp = () => {
+    const interfaces = os.networkInterfaces()
+    for (const interfaceName in interfaces) {
+        const interfacesK = interfaces[interfaceName]
+        for (const iface of interfacesK) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address
+            }
+        }
+    }
+    return null
 }
 
-//? Iniciar sesion
-app.post("/login", (req, res)=> {
-    const {email, nickname, macAddress} = req.body
-    if (!email || !nickname || !macAddress) {
-        return res.status(400).json({message: "Se esperan campos requeridos"})
+//? Iniciar sesión
+app.post('/login', (req, res) => {
+    const { email, nickname, macAddress } = req.body
+    if (!email || !nickname) {
+        return res.status(400).json({ message: 'Falta algún campo.' })
+    }
+
+    if (Object.values(sessions).some(session => session.email === email && session.status === 'activa')) {
+        return res.status(400).json({ message: 'Ya hay una sesión activa para este usuario.' })
     }
 
     const sessionId = uuidv4()
     const now = new Date()
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress
+    const serverIp = getLocalIp()
 
     sessions[sessionId] = {
         sessionId,
         email,
         nickname,
-        macAddress,
-        ip: getServerNetworkInfo(),
         createdAt: now,
-        lastAccess: now
+        lastAccessedAt: now,
+        clientIp,
+        clientMac: macAddress,
+        serverIp,
+        status: 'activa'
     }
 
-    res.status(200).json({
-        message: "Se ha logeado exitosamente",
-        sessionId
-    })
+    req.session.sessionId = sessionId
+    res.status(200).json({ message: 'Inicio de sesión exitoso.', sessionId })
 })
 
-//? Cerrar la sesion
-app.post("/logout", (req, res) => {
-    const {sessionId} = req.body
-    if (!sessionId || !session[sessionId]) {
-        return res.status(404).json({message: "No se ha encntrado una sesion activa"})
+//? Cerrar sesión
+app.post('/logout', (req, res) => {
+    const { sessionId } = req.body
+    if (!sessionId || !sessions[sessionId]) {
+        return res.status(400).json({ message: 'Sesión no válida.' })
     }
 
     delete sessions[sessionId]
-    req,session.destroy((err) => {
+    req.session.destroy(err => {
         if (err) {
-            return res.status(500).send('Error al cerrar la sesion')
+            return res.status(500).json({ message: 'Error al cerrar la sesión.' })
+        }
+        res.status(200).json({ message: 'Sesión cerrada con éxito.' })
+    })
+})
+
+//? Actualizar sesión
+app.put('/update', (req, res) => {
+    const { sessionId, email, nickname } = req.body
+    if (!sessionId || !sessions[sessionId]) {
+        return res.status(400).json({ message: 'Sesión no válida.' })
+    }
+
+    sessions[sessionId].email = email
+    sessions[sessionId].nickname = nickname
+    sessions[sessionId].lastAccessedAt = new Date()
+
+    res.status(200).json({ message: 'Sesión actualizada.', session: sessions[sessionId] })
+})
+
+//? Listar sesiones activas
+app.get('/listCurrentSessions', (req, res) => {
+    const activeSessions = Object.values(sessions).filter(session => session.status === 'activa')
+    res.status(200).json({ activeSessions })
+})
+
+//? Estado de la sesión
+app.get('/status', (req, res) => {
+    const { sessionId } = req.query
+    if (!sessionId || !sessions[sessionId]) {
+        return res.status(404).json({ message: 'No hay sesión activa.' })
+    }
+
+    const session = sessions[sessionId]
+    const mexicoTime = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss')
+    const timeElapsed = moment().diff(moment(session.createdAt), 'seconds')
+    const minutes = Math.floor(timeElapsed / 60)
+    const seconds = timeElapsed % 60
+
+    res.status(200).json({
+        message: 'Sesión activa.',
+        session: {
+            ...session,
+            createdAt: mexicoTime,
+            lastAccessedAt: mexicoTime,
+            timeElapsed: `${minutes} minutos y ${seconds} segundos`
         }
     })
-    res.status(200).json({message:"Se ha cerrado la sesion"})
 })
 
-//? Actualizar la sesion 
-app.put("/update", (req, res) => {
-    const {sessionId, email, nickname} = req.body
-    if (!sessionId || !sessions[sessionId]) {
-        return res.status(404).json({message: "No existe una sesion activa"})
+//? Obtener la IP
+app.get('/ip', (req, res) => {
+    const localIp = getLocalIp()
+    if (localIp) {
+        res.status(200).json({ localIp })
+    } else {
+        res.status(500).json({ message: 'No se pudo obtener la IP local.' })
     }
-
-    if (email) sessions[sessionId].email = email
-    if (nickname) sessions[sessionId].nickname = nickname
-    sessions[sessionId].lastAccess = new Date()
-
-    res.status(200).json({
-        message: "La sesion ha sido actualizada",
-        session: sessions[sessionId]
-    })
 })
 
-//? Estado de la sesion
-app.get("/status", (req, res) => {
-    const sessionId = req.query.sessionId
-    if (!sessionId || !sessions[sessionId]) {
-        return res.status(404).json({message: "No hay una sesion activa"})
-    }
-    
-    res.status(200).json({
-        message: "Sesion activa",
-        session: sessions[sessionId]
-    })
-})
-
-//? Estado de la sesion
-app.get("/", (req, res) => {
+//? Ruta de bienvenida
+app.get('/', (req, res) => {
     return res.status(200).json({
         message: "Bienvenid@ al API de Control de Sesiones",
-        author:"Diego Miguel Rivera Chavez"
+        author: "Diego Miguel Rivera Chavez"
     })
 })
 
-const getServerNetworkInfo = () => {
-    const interfaces = os.networkInterfaces()
-    for (const name in interfaces) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === "IPv4" && !iface.internal) {
-                return {serverIp: iface.address, serverMac: iface.mac}
-            }
-        }
-    }
-}
-
-
-const PORT = 3500
-app.listen(PORT, () =>{
-    console.log(`Servidor ejecutandose en http://localhost:${PORT}`)
+//? Iniciar servidor
+app.listen(3500, () => {
+    console.log('Servidor alojado en el puerto 3500')
 })
