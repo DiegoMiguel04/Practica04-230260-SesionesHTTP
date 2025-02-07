@@ -18,11 +18,11 @@ app.use(
         secret: "P4-DMRCH#u09Hjk01-SesionesHTTP",
         resave: false,
         saveUninitialized: false,
-        cookie: { maxAge: 2*60*1000 }
+        cookie: { maxAge: 10*60*1000 }
     })
 )
 
-//? Función para obtener la IP
+//? Función para obtener la IP`
 const getLocalIp = () => {
     const interfaces = os.networkInterfaces()
     for (const interfaceName in interfaces) {
@@ -94,6 +94,7 @@ app.put('/update', (req, res) => {
     sessions[sessionId].email = email
     sessions[sessionId].nickname = nickname
     sessions[sessionId].lastAccessedAt = new Date()
+    sessions[sessionId].inactivity = `${Math.floor(inactivity.asMinutes())} minutos y ${inactivity.seconds()} segundos`
 
     res.status(200).json({ message: 'Sesión actualizada.', session: sessions[sessionId] })
 })
