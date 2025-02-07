@@ -148,6 +148,6 @@ app.get('/', (req, res) => {
 })
 
 //? Iniciar servidor
-app.listen(3500, () => {
-    console.log('Servidor alojado en el puerto 3500')
+app.listen(3007, () => {
+    console.log('Servidor alojado en el puerto 3007')
 })
